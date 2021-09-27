@@ -32,7 +32,7 @@ namespace VoiceOverLAN
         Task listenerTask;
         System.Timers.Timer timer;
         private bool availableStatus = true;
-        CancellationTokenSource cancelToken = new CancellationTokenSource();
+        public static bool isMuted = false;
         public MainWindow()
         {
             InitializeComponent();
@@ -55,6 +55,12 @@ namespace VoiceOverLAN
             refreshContactButton.Click += refreshContacts;
             listenerTask = Task.Run(() => udpListener());
             BrbBox.SelectionChanged += StatusChanged;
+            muteMicButton.Click += muteMic;
+        }
+
+        private void muteMic(object sender, RoutedEventArgs e)
+        {
+           isMuted = !isMuted;
         }
 
         private void StatusChanged(object sender, SelectionChangedEventArgs e)
@@ -76,19 +82,19 @@ namespace VoiceOverLAN
             }
         }
 
-        private void StartCall(string ip)
+        private void StartCall(string ip, CancellationToken cancellationToken, CancellationTokenSource cancelToken)
         {
-            Task.Run(async () => VoIPClient.ListenVOIP());
-            VoIPClient.SendVOIP(ip);
+            Task.Run(async () => VoIPClient.ListenVOIP(cancellationToken));
+            VoIPClient.SendVOIP(ip, cancellationToken);
             volumeSlider.ValueChanged += (o, arg) => { VoIPClient.ChangeVolume((float)arg.NewValue); };
-            endCallButton.Click += (o, arg) => { VoIPListener.SendCode("13", ip); cancelToken.Cancel(false); this.Dispatcher.Invoke(() => callSectionStackPanel.Visibility = Visibility.Hidden); };
+            endCallButton.Click += (o, arg) => { VoIPListener.SendCode("13", ip); cancelToken.Cancel(); this.Dispatcher.Invoke(() => callSectionStackPanel.Visibility = Visibility.Hidden); };
         }
 
         private void udpListener()
         {
             //10 - calling
-            //11 - call refused
-            //12 - call acccepted
+            //11 - call acccepted
+            //12 - call refused
             //13 - end call
             //20 - checking availability
             //21 - available <-- response
@@ -96,6 +102,8 @@ namespace VoiceOverLAN
             int port = 11001;
             var udpClient = new UdpClient(port);
             var ipEndPoint = new IPEndPoint(IPAddress.Any, port);
+            CancellationTokenSource cancelToken = new CancellationTokenSource();
+            CancellationToken token = cancelToken.Token;
 
             try
             {
@@ -114,7 +122,7 @@ namespace VoiceOverLAN
                                 else dialogString = ipEndPoint.Address.ToString();
                                 dialogString += " is calling. Do you want to answer?";
 
-                                var reader = new Mp3FileReader(@"..\..\Assets\ringtone.mp3");
+                                var reader = new Mp3FileReader(@"Assets\ringtone.mp3");
                                 var WaveOut = new WaveOut();
                                 reader.Skip(27);
                                 WaveOut.Init(reader);
@@ -137,7 +145,7 @@ namespace VoiceOverLAN
                                     this.Dispatcher.Invoke(() => callSectionStackPanel.Visibility = Visibility.Visible);
                                     VoIPListener.SendCode("11", ipEndPoint.Address.ToString());
 
-                                    Task.Run(async () => { StartCall(ipEndPoint.Address.ToString());}, cancelToken.Token);
+                                    Task.Run(async () => StartCall(ipEndPoint.Address.ToString(), token, cancelToken), cancelToken.Token);
                                 }
                                 else if (timeouted == false && result == MessageBoxResult.No)
                                 {
@@ -151,18 +159,18 @@ namespace VoiceOverLAN
                             }
                         case "11":
                             {
-                                Task.Run(async () => { StartCall(ipEndPoint.Address.ToString()); }, cancelToken.Token);
+                                Task.Run(async () => StartCall(ipEndPoint.Address.ToString(), token, cancelToken), cancelToken.Token);
+                                this.Dispatcher.Invoke(() => callSectionStackPanel.Visibility = Visibility.Visible);
                                 break;
                             }
                         case "12":
                             {
-                                this.Dispatcher.Invoke(() => callSectionStackPanel.Visibility = Visibility.Collapsed);
                                 MessageBox.Show("Call was rejected or recipient didn't response in specified time.");
                                 break;
                             }
                         case "13":
                             {
-                                cancelToken.Cancel(false);
+                                cancelToken.Cancel();
                                 this.Dispatcher.Invoke(() => callSectionStackPanel.Visibility = Visibility.Hidden);
                                 break;
                             }
@@ -219,7 +227,13 @@ namespace VoiceOverLAN
 
         private void makeCall(object sender, RoutedEventArgs e)
         {
-            VoIPListener.SendCode("10", contacts.Find(s => contacts.IndexOf(s) == contactListBox.SelectedIndex).IpAddress);
+            if (contactListBox.SelectedIndex != -1)
+            {
+                VoIPListener.SendCode("10", contacts.Find(s => contacts.IndexOf(s) == contactListBox.SelectedIndex).IpAddress);
+                this.Dispatcher.Invoke(() => callSectionStackPanel.Visibility = Visibility.Visible);
+            }
+            else MessageBox.Show("Choose contact!");
+                
         }
 
         private async void deleteContact(object sender, RoutedEventArgs e)
@@ -358,6 +372,5 @@ namespace VoiceOverLAN
 
         //TODO:
         //wyciszanie mikro
-        //sterowanie głośnością
     }
 }

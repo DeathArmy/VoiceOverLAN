@@ -6,6 +6,7 @@ using System.Text;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading.Tasks;
+using System.Threading;
 
 namespace VoiceOverLAN
 {
@@ -15,12 +16,13 @@ namespace VoiceOverLAN
         private BufferedWaveProvider BufferedWaveProvider { get; set; }
         private WaveInEvent WaveIn { get; set; }
         private WaveOutEvent WaveOut { get; set; }
+        private float volume = 1;
 
         public VoIPClient()
         {
         }
 
-        public void ListenVOIP()
+        public void ListenVOIP(CancellationToken cancellationToken)
         {
             var udpClient = new UdpClient(port);
             var ipEndPoint = new IPEndPoint(IPAddress.Any, port);
@@ -38,6 +40,9 @@ namespace VoiceOverLAN
                 {
                     var bytes = udpClient.Receive(ref ipEndPoint);
                     BufferedWaveProvider.AddSamples(bytes, 0, bytes.Length);
+                    WaveOut.Volume = volume;
+
+                    if (cancellationToken.IsCancellationRequested) cancellationToken.ThrowIfCancellationRequested();
                 }
             }
             catch (SocketException e)
@@ -49,7 +54,7 @@ namespace VoiceOverLAN
                 udpClient.Close();
             }
         }
-        public void SendVOIP(string recipientIp)
+        public void SendVOIP(string recipientIp, CancellationToken cancellationToken)
         {
             var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
             var ipAddress = IPAddress.Parse(recipientIp);
@@ -59,7 +64,8 @@ namespace VoiceOverLAN
 
             WaveIn.DataAvailable += (o, arg) =>
             {
-                socket.SendTo(arg.Buffer, ipEndPoint);
+                if (!VoiceOverLAN.MainWindow.isMuted) socket.SendTo(arg.Buffer, ipEndPoint);
+                if (cancellationToken.IsCancellationRequested) cancellationToken.ThrowIfCancellationRequested();
             };
 
             WaveIn.StartRecording();
@@ -67,7 +73,7 @@ namespace VoiceOverLAN
 
         public void ChangeVolume(float value)
         {
-            WaveOut.Volume = value;
+            this.volume = value;
         }
     }
 }
